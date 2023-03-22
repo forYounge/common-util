@@ -4,12 +4,15 @@ import cn.hutool.core.util.ArrayUtil;
 import cn.hutool.core.util.StrUtil;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * 金额工具类
- * 包含了"检查大写金额是否符合规则"、"金额小写转大写"、"金额大写转小写"的方法
  *
- * @author StevinEvie
+ * @author yangyi
  * @描述: 人民币 数字转大写中文格式
  * 人民币大写金额写法及注意事项
  * 银行、单位和个人填写的各种票据和结算凭证是办理支付结算和现金收付的重要依据，直接关系到支付结算的准确、及时和安全。
@@ -32,7 +35,7 @@ import java.math.BigDecimal;
  * 五、票据的出票日期必须使用中文大写，为防止变造票据的出票日期，在填写月、日时、月为壹、贰和壹拾的，日为壹至玖和壹拾、贰拾和叁拾的，应在其前加“零”，日为拾壹至拾玖的应在其前加“壹”，如1月15日应写成零壹月壹拾伍日，再如10月20日应写成零壹拾月零贰拾日。
  * 六、票据出票日期使用小写填写的，银行不予受理；大写日期未按要求规范填写的，银行可予受理，但由此造成损失的由出票人自行承担。
  * @description
- * @Date 2023/02/21
+ * @Date 2022/10/27
  */
 public class MoneyUtils {
     /**
@@ -45,6 +48,7 @@ public class MoneyUtils {
     private static final String[] CN_UPPER_MONETARY_UNIT = {"分", "角", "元",
             "拾", "佰", "仟", "万", "拾", "佰", "仟", "亿", "拾", "佰", "仟", "兆", "拾",
             "佰", "仟"};
+
     /**
      * 只有各单位的单独字符
      */
@@ -56,6 +60,11 @@ public class MoneyUtils {
     private static final String[] CN_ZS_UPPER_MONETARY_UNIT = {"元",
             "拾", "佰", "仟", "万", "拾", "佰", "仟", "亿", "拾", "佰", "仟", "兆", "拾",
             "佰", "仟"};
+
+    /**
+     * 关键单位
+     */
+    private static final String[] TARGETS = {"亿", "万", "元", "兆"};
 
     private static final String[] CN_ZS_UPPER_REVERSER_MONETARY_UNIT = {"佰", "拾", "元"};
 
@@ -89,178 +98,17 @@ public class MoneyUtils {
      * 特殊字符：零元整
      */
     private static final String CN_ZEOR_FULL = "零元" + CN_FULL;
-
     /**
-     * 检查大写金额规则
-     *
-     * @param chineseAmount
-     * @return
+     * 四舍五入
      */
-    public static boolean checkAmountRules(String chineseAmount) {
-        //大写金额数字有“分”的，“分”后面不写“整”（或“正”）字。
-        if (StrUtil.isEmpty(chineseAmount)) {
-            return false;
-        }
-        //如果出现了任意一个不在CN_NUMBER_ALL中的字符，则返回false
-        String[] wordCharArray = chineseAmount.split("");
-        for (String c : wordCharArray) {
-            if (!ArrayUtil.contains(CN_NUMBER_ALL, c)) {
-                return false;
-            }
-        }
-        //最后一个字符
-        String lastChar = chineseAmount.substring(chineseAmount.length() - 1);
-        boolean containYuan = chineseAmount.contains(CN_YUAN[0])
-                || chineseAmount.contains(CN_YUAN[1])
-                || chineseAmount.contains(CN_YUAN[2]);
-        //中文大写金额数字到“元”为止的，在“元”之后、应写“整”（或“正”）字；
-        if (ArrayUtil.contains(CN_YUAN, lastChar)) {
-            return false;
-        }
-        if (chineseAmount.contains(CN_UPPER_MONETARY_UNIT[0]) && ArrayUtil.contains(CN_Z, lastChar)) {
-            return false;
-        }
-        //阿拉伯金额数字角位是“0”而分位不是“0”时，中文大写金额“元”后面应写“零”字
-        if (chineseAmount.endsWith(CN_UPPER_MONETARY_UNIT[0])) {
-            String chineseNumber = getChineseNumberWithEx(chineseAmount);
-            if (chineseNumber == null) return false;
-            if (StrUtil.isEmpty(chineseNumber)) {
-                return false;
-            }
-            //如果"角"位是0
-            boolean jiaoIsZero = '0' == chineseNumber.charAt(chineseNumber.length() - 2);
-            boolean fenIsZero = '0' == chineseNumber.charAt(chineseNumber.length() - 1);
-            boolean yuanThenZero = false;
-            //如果元后面是零置为true
-            if ('零' == chineseAmount.charAt(chineseAmount.lastIndexOf(CN_YUAN[0]) + 1)
-                    || '零' == chineseAmount.charAt(chineseAmount.lastIndexOf(CN_YUAN[1]) + 1)
-                    || '零' == chineseAmount.charAt(chineseAmount.lastIndexOf(CN_YUAN[2]) + 1)) {
-                yuanThenZero = true;
-            }
-            if (jiaoIsZero && !fenIsZero && containYuan && !yuanThenZero) {
-                return false;
-            }
-            if (jiaoIsZero && !fenIsZero && chineseAmount.contains("零角")) {
-                return false;
-            }
-        }
-        if (containYuan) {
-            String chineseNumber = getChineseNumberWithEx(chineseAmount);
-            if (chineseNumber == null) return false;
-            if (StrUtil.isEmpty(chineseNumber)) {
-                return false;
-            }
-            chineseAmount = replaceComplexChinese(chineseAmount);
-            //如果包含万
-            if (chineseNumber.contains(".")) {
-                String zsNumberStr = chineseNumber.substring(0, chineseNumber.indexOf("."));
-                if (zsNumberStr.length() > 5) {
-                    //拿到整数Number
-                    long zsNumber = Long.valueOf(zsNumberStr);
-                    int thousandUnit = (int) ((zsNumber / 1000) % 10);
-                    int wanUnit = (int) ((zsNumber / 10000) % 10);
-                    //万位是0，千位也是0，需要写"零"
-                    if (wanUnit == 0 && thousandUnit == 0) {
-                        int wanIndex = getWanIndex(chineseAmount);
-                        //从万往下循环，找到不是0的那一位的单位，然后找万和这个单位之间有没有"零"
-                        String numUnit = null;
-                        int numIndex = 0;
-                        String leftNumStr = zsNumberStr.substring(zsNumberStr.length() - 3);
-                        while (true) {
-                            if (leftNumStr.length() <= 0) {
-                                break;
-                            }
-                            //从佰开始去掉最前面的字符
-                            numUnit = leftNumStr.substring(0, 1);
-                            if ("0".equals(numUnit) || numIndex == 0) {
-                                //让zsNumberStr每次都去掉最前面的一位数
-                                leftNumStr = leftNumStr.substring(1);
-                                ++numIndex;
-                                continue;
-                            } else {
-                                //查看所在位置
-                                String unit = CN_ZS_UPPER_REVERSER_MONETARY_UNIT[numIndex];
-                                //拿到第一个不是零的靠近万的字符串
-                                String wanToUnitStr = chineseAmount.substring(chineseAmount.lastIndexOf(CN_NUMBER_ALL[wanIndex]),
-                                        chineseAmount.lastIndexOf(unit));
-                                if (!wanToUnitStr.contains(CN_NUMBER_ALL[0])) {
-                                    return false;
-                                }
-                            }
-                            leftNumStr = leftNumStr.substring(1);
-                            ++numIndex;
-                        }
-                    }
-                }
-            }
-            //元位是否为零，为零则从CN_UPPER_MONETARY_UNIT[3]开始，查找ChineseAmount中是否有，如果匹配到，则中间写零返回false
-            boolean yuanIsZero = "0".equals(chineseNumber.substring(chineseNumber.indexOf(".") - 1, chineseNumber.indexOf(".")));
-            if (yuanIsZero) {
-                if ("0.00".equals(chineseNumber)) {
-                    return true;
-                }
-                chineseAmount = replaceComplexChinese(chineseAmount);
-                int yuanAfterReplaceIndex = getYuanIndex(chineseAmount);
-                //元位是0，从拾到兆，找到第一个CN_UPPER_MONETARY_UNIT碰到的单位，这个单位和元之间不能有零
-                String[] splitAmount = chineseAmount.split("元")[0].split("");
-                String yuanBeforeUnit = "元";
-                //找到元前面的单位
-                for (int j = splitAmount.length - 1; j > 0; j--) {
-                    for (int i = 3; i < CN_UPPER_SINGLE_MONETARY_UNIT.length; i++) {
-                        if (CN_UPPER_SINGLE_MONETARY_UNIT[i].equals(splitAmount[j])) {
-                            yuanBeforeUnit = splitAmount[j];
-                            break;
-                        }
-                    }
-                    if (!"元".equals(yuanBeforeUnit)) {
-                        break;
-                    }
-                }
-                String judgeParagraph = chineseAmount.substring(chineseAmount.lastIndexOf(yuanBeforeUnit),
-                        chineseAmount.lastIndexOf(CN_NUMBER_ALL[yuanAfterReplaceIndex]));
-                if (judgeParagraph.contains(CN_NUMBER_ALL[0])) {
-                    return false;
-                }
-            } else {
-                //元位不是零，两个数字间至少写一个零，查找原数字中是否有0出现，有的话查看位数在哪里
-                //100204.05--壹拾万零贰佰零肆元零伍分，百位及以上是否有0，有则找到最后一个不是0的数字的单位，查找此单位和元之前是否有零，没有则false
-                String zsNumberStr = chineseNumber.substring(0, chineseNumber.indexOf("."));
-                //拿到整数Number
-                long zsNumber = Long.valueOf(zsNumberStr);
-                int numUnit = 0;
-                int numIndex = 0;
-                while (true) {
-                    if (zsNumber <= 0) {
-                        break;
-                    }
-                    numUnit = (int) (zsNumber % 10);
-                    if (numUnit == 0 || numIndex == 0) {
-                        // 让number每次都去掉最后一个数
-                        zsNumber = zsNumber / 10;
-                        ++numIndex;
-                        continue;
-                    } else {
-                        //查看所在位置
-                        chineseAmount = replaceComplexChinese(chineseAmount);
-                        int yuanAfterReplaceIndex = getYuanIndex(chineseAmount);
-                        String unit = CN_ZS_UPPER_MONETARY_UNIT[numIndex];
-                        //拿到第一个不是零的靠近元的字符串
-                        String zsFirstUnitToYuanStr = chineseAmount.substring(chineseAmount.lastIndexOf(unit),
-                                chineseAmount.lastIndexOf(CN_NUMBER_ALL[yuanAfterReplaceIndex]));
-                        if (!"拾".equals(unit) && !zsFirstUnitToYuanStr.contains(CN_NUMBER_ALL[0])) {
-                            return false;
-                        }
-                    }
-                    zsNumber = zsNumber / 10;
-                    ++numIndex;
-                }
-            }
-        }
-        return true;
-    }
+    public static final RoundingMode HALF_UP = RoundingMode.HALF_UP;
+    /**
+     * 向上取整
+     */
+    public static final RoundingMode UP = RoundingMode.UP;
 
     /**
-     * 金额小写转大写
+     * 把输入的金额转换为汉语中人民币的大写
      *
      * @param numberStr 输入的金额
      * @return 对应的汉语大写
@@ -342,7 +190,7 @@ public class MoneyUtils {
     }
 
     /**
-     * 金额大写转小写
+     * 大写金额转数字
      *
      * @param chineseAmount
      * @return
@@ -453,6 +301,289 @@ public class MoneyUtils {
     }
 
     /**
+     * 检查大写金额规则
+     *
+     * @param chineseAmount
+     * @return
+     */
+    public static boolean checkAmountRules(String chineseAmount) {
+        //大写金额数字有“分”的，“分”后面不写“整”（或“正”）字。
+        if (StrUtil.isEmpty(chineseAmount)) {
+            return false;
+        }
+        //如果出现了任意一个不在CN_NUMBER_ALL中的字符，则返回false
+        String[] wordCharArray = chineseAmount.split("");
+        for (String c : wordCharArray) {
+            if (!ArrayUtil.contains(CN_NUMBER_ALL, c)) {
+                return false;
+            }
+        }
+        //最后一个字符
+        String lastChar = chineseAmount.substring(chineseAmount.length() - 1);
+        boolean containYuan = chineseAmount.contains(CN_YUAN[0])
+                || chineseAmount.contains(CN_YUAN[1])
+                || chineseAmount.contains(CN_YUAN[2]);
+        //中文大写金额数字到“元”为止的，在“元”之后、应写“整”（或“正”）字；
+        if (ArrayUtil.contains(CN_YUAN, lastChar)) {
+            return false;
+        }
+        if (chineseAmount.contains(CN_UPPER_MONETARY_UNIT[0]) && ArrayUtil.contains(CN_Z, lastChar)) {
+            return false;
+        }
+        //阿拉伯金额数字角位是“0”而分位不是“0”时，中文大写金额“元”后面应写“零”字
+        if (chineseAmount.endsWith(CN_UPPER_MONETARY_UNIT[0])) {
+            String chineseNumber = getChineseNumberWithEx(chineseAmount);
+            if (chineseNumber == null) return false;
+            if (StrUtil.isEmpty(chineseNumber)) {
+                return false;
+            }
+            //如果"角"位是0
+            boolean jiaoIsZero = '0' == chineseNumber.charAt(chineseNumber.length() - 2);
+            boolean fenIsZero = '0' == chineseNumber.charAt(chineseNumber.length() - 1);
+            boolean yuanThenZero = false;
+            //如果元后面是零置为true
+            if ('零' == chineseAmount.charAt(chineseAmount.lastIndexOf(CN_YUAN[0]) + 1)
+                    || '零' == chineseAmount.charAt(chineseAmount.lastIndexOf(CN_YUAN[1]) + 1)
+                    || '零' == chineseAmount.charAt(chineseAmount.lastIndexOf(CN_YUAN[2]) + 1)) {
+                yuanThenZero = true;
+            }
+            if (jiaoIsZero && !fenIsZero && containYuan && !yuanThenZero) {
+                return false;
+            }
+            if (jiaoIsZero && !fenIsZero && chineseAmount.contains("零角")) {
+                return false;
+            }
+        }
+        if (containYuan) {
+            String chineseNumber = getChineseNumberWithEx(chineseAmount);
+            if (chineseNumber == null) return false;
+            if (StrUtil.isEmpty(chineseNumber)) {
+                return false;
+            }
+            chineseAmount = replaceComplexChinese(chineseAmount);
+            //如果包含万
+            if (chineseNumber.contains(".")) {
+                String zsNumberStr = chineseNumber.substring(0, chineseNumber.indexOf("."));
+                if (zsNumberStr.length() > 5) {
+                    //拿到整数Number
+                    long zsNumber = Long.valueOf(zsNumberStr);
+                    int thousandUnit = (int) ((zsNumber / 1000) % 10);
+                    int wanUnit = (int) ((zsNumber / 10000) % 10);
+                    //万位是0，千位也是0，需要写"零"
+                    if (wanUnit == 0 && thousandUnit == 0) {
+                        int wanIndex = getWanIndex(chineseAmount);
+                        //从万往下循环，找到不是0的那一位的单位，然后找万和这个单位之间有没有"零"
+                        String numUnit = null;
+                        int numIndex = 0;
+                        String leftNumStr = zsNumberStr.substring(zsNumberStr.length() - 3);
+                        while (true) {
+                            if (leftNumStr.length() <= 0) {
+                                break;
+                            }
+                            //从佰开始去掉最前面的字符
+                            numUnit = leftNumStr.substring(0, 1);
+                            if ("0".equals(numUnit) || numIndex == 0) {
+                                //让zsNumberStr每次都去掉最前面的一位数
+                                leftNumStr = leftNumStr.substring(1);
+                                ++numIndex;
+                                continue;
+                            } else {
+                                //查看所在位置
+//                                chineseAmount = replaceComplexChinese(chineseAmount);
+                                String unit = CN_ZS_UPPER_REVERSER_MONETARY_UNIT[numIndex];
+                                //拿到第一个不是零的靠近万的字符串
+                                String wanToUnitStr = chineseAmount.substring(chineseAmount.lastIndexOf(CN_NUMBER_ALL[wanIndex]),
+                                        chineseAmount.lastIndexOf(unit));
+                                if (!wanToUnitStr.contains(CN_NUMBER_ALL[0])) {
+                                    return false;
+                                }
+                            }
+                            leftNumStr = leftNumStr.substring(1);
+                            ++numIndex;
+                        }
+                    }
+                }
+            }
+            //元位是否为零，为零则从CN_UPPER_MONETARY_UNIT[3]开始，查找ChineseAmount中是否有，如果匹配到，则中间写零返回false
+            boolean yuanIsZero = "0".equals(chineseNumber.substring(chineseNumber.indexOf(".") - 1, chineseNumber.indexOf(".")));
+            if (yuanIsZero) {
+                if ("0.00".equals(chineseNumber)) {
+                    return true;
+                }
+                chineseAmount = replaceComplexChinese(chineseAmount);
+                int yuanAfterReplaceIndex = getYuanIndex(chineseAmount);
+                //元位是0，从拾到兆，找到第一个CN_UPPER_MONETARY_UNIT碰到的单位，这个单位和元之间不能有零
+                String[] splitAmount = chineseAmount.split("元")[0].split("");
+                String yuanBeforeUnit = "元";
+                //找到元前面的单位
+                for (int j = splitAmount.length - 1; j > 0; j--) {
+                    for (int i = 3; i < CN_UPPER_SINGLE_MONETARY_UNIT.length; i++) {
+                        if (CN_UPPER_SINGLE_MONETARY_UNIT[i].equals(splitAmount[j])) {
+                            yuanBeforeUnit = splitAmount[j];
+                            break;
+                        }
+                    }
+                    if (!"元".equals(yuanBeforeUnit)) {
+                        break;
+                    }
+                }
+                String judgeParagraph = chineseAmount.substring(chineseAmount.lastIndexOf(yuanBeforeUnit),
+                        chineseAmount.lastIndexOf(CN_NUMBER_ALL[yuanAfterReplaceIndex]));
+                if (judgeParagraph.contains(CN_NUMBER_ALL[0])) {
+                    return false;
+                }
+            } else {
+                //元位不是零，两个数字间至少写一个零，查找原数字中是否有0出现，有的话查看位数在哪里
+                //100204.05--壹拾万零贰佰零肆元零伍分，百位及以上是否有0，有则找到最后一个不是0的数字的单位，查找此单位和元之前是否有零，没有则false
+                String zsNumberStr = chineseNumber.substring(0, chineseNumber.indexOf("."));
+                //拿到整数Number
+                long zsNumber = Long.valueOf(zsNumberStr);
+                //万位是0千位不是0，可以不写"零"
+                boolean wanZeroThousandNotZero = judgeWanAndThousand(zsNumber);
+                int numUnit = 0;
+                int numIndex = 0;
+                while (true) {
+                    if (zsNumber <= 0) {
+                        break;
+                    }
+                    numUnit = (int) (zsNumber % 10);
+                    if (numUnit == 0 || numIndex == 0) {
+                        // 让number每次都去掉最后一个数
+                        zsNumber = zsNumber / 10;
+                        ++numIndex;
+                        continue;
+                    } else {
+                        //查看所在位置
+                        chineseAmount = replaceComplexChinese(chineseAmount);
+//                        int yuanAfterReplaceIndex = getYuanIndex(chineseAmount);
+                        String unit = CN_ZS_UPPER_MONETARY_UNIT[numIndex];
+                        //确定要取的区间，确定基准单位兆、亿、万、元
+                        String nearUnitByIndex = getNearUnitByIndex(numIndex);
+                        //拿到第一个不是零的靠近基准单位的字符串
+                        StringBuilder chAmountSb = new StringBuilder(chineseAmount);
+                        String reverseChAmount = chAmountSb.reverse().toString();
+                        String reverseZsFirst2StandardUnit = null;
+                        //截取子字符串，加上unit的长度
+                        String standard2LastStr = reverseChAmount.substring(reverseChAmount.indexOf(nearUnitByIndex));
+                        reverseZsFirst2StandardUnit = standard2LastStr.substring(0, standard2LastStr.indexOf(unit) + 1);
+                        StringBuilder zsSb = new StringBuilder(reverseZsFirst2StandardUnit);
+                        String zsFirst2StandardUnit = zsSb.reverse().toString();
+                        String zsNumberSubStr = String.valueOf(zsNumber);
+                        String middleStr = zsNumberStr.substring(zsNumberStr.indexOf(zsNumberSubStr) + zsNumberSubStr.length(), zsNumberStr.length() - 1);
+                        //如果middleStr包含的0是万位的0，同时整个字符串中万位是0但千位不是0的，则需要跳过去
+                        boolean zeroAtWan = judgeZeroAtWan(middleStr);
+                        if (!"拾".equals(unit) && middleStr.contains("0") && !zsFirst2StandardUnit.contains(CN_NUMBER_ALL[0]) && !(zeroAtWan && wanZeroThousandNotZero)) {
+                            return false;
+                        }
+                    }
+                    zsNumber = zsNumber / 10;
+                    ++numIndex;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 金额乘法
+     *
+     * @param first
+     * @param second
+     * @param roundingMode 默认四舍五入
+     * @param scale        默认2位小数
+     * @return
+     * @return BigDecimal
+     * @deccription 金额乘法
+     */
+    public static BigDecimal multiply(BigDecimal first, BigDecimal second, RoundingMode roundingMode,
+                                      Integer scale) {
+        if (roundingMode == null) {
+            roundingMode = HALF_UP;
+        }
+        if (first == null)
+            first = BigDecimal.ZERO;
+        if (second == null)
+            second = BigDecimal.ZERO;
+        if (scale == null)
+            scale = 2;
+        return (first.multiply(second)).setScale(scale, roundingMode);
+    }
+
+    /**
+     * 金额除法
+     *
+     * @param first
+     * @param second
+     * @param roundingMode 默认四舍五入
+     * @param scale        默认2位小数
+     * @return
+     * @return BigDecimal
+     * @deccription 金额除法
+     */
+    public static BigDecimal divide(BigDecimal first, BigDecimal second, RoundingMode roundingMode,
+                                    Integer scale) {
+        if (roundingMode == null) {
+            roundingMode = HALF_UP;
+        }
+        if (first == null)
+            first = BigDecimal.ZERO;
+        if (second == null)
+            second = BigDecimal.ZERO;
+        if (scale == null)
+            scale = 2;
+        return first.divide(second, scale, roundingMode);
+    }
+
+    /**
+     * 金额减法
+     *
+     * @param first
+     * @param second
+     * @param roundingMode 默认四舍五入
+     * @param scale        默认2位小数
+     * @return
+     * @return BigDecimal
+     * @deccription 金额减法
+     */
+    public static BigDecimal subtract(BigDecimal first, BigDecimal second, RoundingMode roundingMode,
+                                      Integer scale) {
+        if (roundingMode == null) {
+            roundingMode = HALF_UP;
+        }
+        if (first == null)
+            first = BigDecimal.ZERO;
+        if (second == null)
+            second = BigDecimal.ZERO;
+        if (scale == null)
+            scale = 2;
+        return (first.subtract(second)).setScale(scale, roundingMode);
+    }
+
+    /**
+     * 金额加法
+     *
+     * @param first
+     * @param second
+     * @param roundingMode 默认四舍五入
+     * @param scale        默认2位小数
+     * @return
+     * @return BigDecimal
+     * @deccription 金额加法
+     */
+    public static BigDecimal add(BigDecimal first, BigDecimal second, RoundingMode roundingMode, Integer scale) {
+        if (roundingMode == null) {
+            roundingMode = HALF_UP;
+        }
+        if (first == null)
+            first = BigDecimal.ZERO;
+        if (second == null)
+            second = BigDecimal.ZERO;
+        if (scale == null)
+            scale = 2;
+        return (first.add(second)).setScale(scale, roundingMode);
+    }
+
+    /**
      * 转换中文数字为阿拉伯数字
      *
      * @param chinese
@@ -497,6 +628,44 @@ public class MoneyUtils {
                 break;
         }
         return number;
+    }
+
+    /**
+     * 判断middleStr的0是否在万位上
+     *
+     * @param middleStr
+     * @return
+     */
+    private static boolean judgeZeroAtWan(String middleStr) {
+        if (StrUtil.isEmpty(middleStr)) {
+            return false;
+        }
+        StringBuilder sb = new StringBuilder(middleStr);
+        sb.reverse();
+        String reverseStr = sb.toString();
+        if (reverseStr.length() > 4 && '0' == reverseStr.charAt(3)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 判断万位是0但千位不是0
+     *
+     * @param zsNumber
+     * @return
+     */
+    private static boolean judgeWanAndThousand(long zsNumber) {
+        if (zsNumber < 10000) {
+            return false;
+        }
+        String zsNumberStr = String.valueOf(zsNumber);
+        char wanWei = zsNumberStr.charAt(zsNumberStr.length() - 5);
+        char qianWei = zsNumberStr.charAt(zsNumberStr.length() - 4);
+        if (wanWei == '0' && qianWei != '0') {
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -565,43 +734,70 @@ public class MoneyUtils {
         return chineseNumber;
     }
 
-    public static void main(String[] args) {
-        //true
-        System.out.println(checkAmountRules("壹拾萬零貳拾元零叁分"));
-        //true
-        System.out.println(checkAmountRules("壹拾萬零貳仟元零叁分"));
-        System.out.println(checkAmountRules("壹拾萬零柒拾元零叁分"));
-        System.out.println(checkAmountRules("壹億元零叁分"));
-        System.out.println(checkAmountRules("陸元零叁分"));
-        //true
-        System.out.println(checkAmountRules("壹拾万零柒拾元零叁分"));
-        System.out.println(checkAmountRules("叁分"));
-        System.out.println(checkAmountRules("貳角"));
-        System.out.println(checkAmountRules("貳角正"));
-        System.out.println(checkAmountRules("陆元整"));
-        System.out.println(checkAmountRules("陸億叁仟萬元正"));
-        System.out.println(checkAmountRules("陸億叁仟萬元正"));
-        System.out.println(checkAmountRules("陸億叁仟萬元正"));
-        System.out.println(checkAmountRules("壹拾万零贰佰零肆元零伍分"));
-        System.out.println("==========================");
-        //true
-        System.out.println(checkAmountRules("壹仟陆佰捌拾元零叁角贰分"));
-        System.out.println(checkAmountRules("壹仟陆佰捌拾元叁角贰分"));
-        //true
-        System.out.println(checkAmountRules("壹拾万柒仟元零伍角叁分"));
-        System.out.println(checkAmountRules("壹拾万零柒仟元伍角叁分"));
-        //true
-        System.out.println(checkAmountRules("壹拾万零柒拾元零叁分"));
-        //false
-        System.out.println(checkAmountRules("壹拾万零柒拾元零角叁分"));
-        System.out.println(checkAmountRules("壹拾万柒拾元零叁分"));
-        System.out.println(checkAmountRules("壹拾万零柒拾元叁分"));
-        //true
-        System.out.println(checkAmountRules("叁佰伍拾万零肆仟零玖拾陆元肆角叁分"));
-        System.out.println(checkAmountRules("叁佰伍拾万肆仟零玖拾陆元肆角叁分"));
-        //false
-        System.out.println(checkAmountRules("叁佰伍拾万零肆仟玖拾陆元肆角叁分"));
-        System.out.println(checkAmountRules("叁佰伍拾万肆仟玖拾陆元肆角叁分"));
-    }
-}
+    /**
+     * 找到离给定下标最近的“兆”，“亿”，“万”，“元”的字符串
+     *
+     * @param index
+     * @return
+     */
+    private static String getNearUnitByIndex(int index) {
+        //将数组转换为列表，并截取从开头到下标的部分
+        List<String> list = Arrays.asList(CN_ZS_UPPER_MONETARY_UNIT).subList(0, index + 1);
 
+        //使用流API过滤出目标字符串，并返回第一个匹配的元素（如果存在）
+        Optional<String> result = list.stream()
+                .filter(s -> Arrays.asList(TARGETS).contains(s)) //过滤条件
+                .reduce((a, b) -> b); //返回最后一个匹配的元素
+        if (result.isPresent()) {
+            return result.get();
+        } else {
+            return null;
+        }
+    }
+
+//    public static void main(String[] args) {
+//        //需求（3）false
+//        System.out.println(checkAmountRules("壹拾万零柒拾元零角叁分"));
+//        System.out.println(checkAmountRules("壹拾万柒拾元零叁分"));
+//        System.out.println(checkAmountRules("壹拾万零柒拾元叁分"));
+//        //需求（4）false
+//        System.out.println(checkAmountRules("叁佰伍拾万零肆仟玖拾陆元肆角叁分"));
+//        System.out.println(checkAmountRules("叁佰伍拾万肆仟玖拾陆元肆角叁分"));
+//        //true
+//        System.out.println(checkAmountRules("壹拾萬零貳拾元零叁分"));
+//        //true
+//        System.out.println(checkAmountRules("壹拾萬零貳仟元零叁分"));
+//        System.out.println(checkAmountRules("壹拾萬零柒拾元零叁分"));
+//        System.out.println(checkAmountRules("壹億元零叁分"));
+//        System.out.println(checkAmountRules("陸元零叁分"));
+//        //true
+//        System.out.println(checkAmountRules("壹拾万零柒拾元零叁分"));
+//        System.out.println(checkAmountRules("叁分"));
+//        System.out.println(checkAmountRules("貳角"));
+//        System.out.println(checkAmountRules("貳角正"));
+//        System.out.println(checkAmountRules("陆元整"));
+//        System.out.println(checkAmountRules("陸億叁仟萬元正"));
+//        System.out.println(checkAmountRules("陸億叁仟萬元正"));
+//        System.out.println(checkAmountRules("陸億叁仟萬元正"));
+//        System.out.println(checkAmountRules("壹拾万零贰佰零肆元零伍分"));
+//        System.out.println("==========================");
+//        //true
+//        System.out.println(checkAmountRules("壹仟陆佰捌拾元零叁角贰分"));
+//        System.out.println(checkAmountRules("壹仟陆佰捌拾元叁角贰分"));
+//        //true 107000.53
+//        System.out.println(checkAmountRules("壹拾万柒仟元零伍角叁分"));
+//        System.out.println(checkAmountRules("壹拾万零柒仟元伍角叁分"));
+//        //true
+//        System.out.println(checkAmountRules("壹拾万零柒拾元零叁分"));
+//        //true 3504096.43
+//        System.out.println(checkAmountRules("叁佰伍拾万零肆仟零玖拾陆元肆角叁分"));
+//        System.out.println(checkAmountRules("叁佰伍拾万肆仟零玖拾陆元肆角叁分"));
+//        // true
+//        System.out.println(checkAmountRules("壹万叁仟伍佰伍拾肆元壹角陆分"));
+//        // true 7301687.36
+//        System.out.println(checkAmountRules("柒佰叁拾万零壹仟陆佰捌拾柒元叁角陆分"));
+//        System.out.println(checkAmountRules("柒佰叁拾万壹仟陆佰捌拾柒元叁角陆分"));
+//        //true
+//        System.out.println(checkAmountRules("壹仟零贰拾叁万玖仟叁佰陆拾陆元陆角柒分"));
+//    }
+}
